@@ -1,0 +1,30 @@
+# EasyAPI - Apache Rewrite Rules for Clean URLs
+# Todas las peticiones se redirigen a index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Determinar el base path dinámicamente
+    RewriteBase /custom/easyapi/api/
+    
+    # Si el archivo o directorio existe, no reescribir
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # Redirigir todo a index.php
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Seguridad adicional
+<IfModule mod_headers.c>
+    # Prevenir sniffing de MIME type
+    Header always set X-Content-Type-Options "nosniff"
+    # XSS Protection
+    Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Denegar acceso a archivos sensibles
+<FilesMatch "\.(env|log|bak|sql|ini|sh)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>

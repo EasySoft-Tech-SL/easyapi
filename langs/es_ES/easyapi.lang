@@ -1,0 +1,54 @@
+# Copyright (C) 2025 Alberto Luque Rivas <aluquerivasdev@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+#
+# Generic
+#
+
+# Module label 'ModuleEasyapiName'
+ModuleEasyapiName = EasyAPI
+# Module description 'ModuleEasyapiDesc'
+ModuleEasyapiDesc = API REST Headless para Dolibarr con Slim Framework - Extensible via Hooks
+
+#
+# Admin page
+#
+EasyapiSetup = Configuración de EasyAPI
+Settings = Configuración
+EasyapiSetupPage = Configurar los ajustes del módulo EasyAPI
+EasyapiAPISetup = Configuración de la API
+EasyapiAPISetupPage = Configurar ajustes de la API REST (CORS, Rate Limiting, Logging)
+
+# API Config
+EASYAPI_CORS_ENABLED = Habilitar CORS
+EASYAPI_CORS_ORIGIN = Origen Permitido
+EASYAPI_RATE_LIMIT_ENABLED = Habilitar Rate Limiting
+EASYAPI_RATE_LIMIT_MAX = Máximo de Peticiones
+EASYAPI_RATE_LIMIT_WINDOW = Ventana de Tiempo (segundos)
+EASYAPI_LOG_ENABLED = Habilitar Logging
+EASYAPI_LOG_FILE = Ruta del Archivo de Log
+EASYAPI_DEBUG = Modo Debug
+EASYAPI_PUBLIC_ROUTES = Rutas Públicas
+
+#
+# About page
+#
+About = Acerca de
+EasyapiAbout = Acerca de EasyAPI
+EasyapiAboutPage = Información sobre el módulo EasyAPI
+
+#
+# Sample page
+#
+EasyapiArea = Inicio EasyAPI
+MyPageName = Mi página
+
+#
+# Sample widget
+#
+EasyapiWidget = Mi widget EasyAPI
+EasyapiWidgetDescription = Descripción del widget EasyAPI

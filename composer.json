@@ -1,0 +1,30 @@
+{
+    "name": "easysoft/easyapi",
+    "description": "Dolibarr Headless API Module with Slim Framework - Extensible via Hooks",
+    "type": "dolibarr-module",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Alberto Luque Rivas",
+            "email": "aluquerivasdev@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "slim/slim": "^4.12",
+        "slim/psr7": "^1.6",
+        "nyholm/psr7": "^1.8",
+        "nyholm/psr7-server": "^1.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "EasyApi\\": "class/",
+            "EasyApi\\Middleware\\": "middleware/",
+            "EasyApi\\Routes\\": "routes/"
+        }
+    },
+    "config": {
+        "vendor-dir": "vendor",
+        "optimize-autoloader": true
+    }
+}

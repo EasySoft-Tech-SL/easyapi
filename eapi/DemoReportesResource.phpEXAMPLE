@@ -1,0 +1,601 @@
+<?php
+/**
+ * Demo Reportes Resource - EJEMPLO COMPLETO de EAPI
+ *
+ * Este archivo demuestra TODAS las capacidades del sistema EAPI:
+ * - Rutas GET, POST, PUT, PATCH, DELETE
+ * - Rutas públicas y privadas
+ * - Middleware personalizado
+ * - Control de permisos (requirePermission)
+ * - Documentación completa (pathParams, queryParams, body, describe, tags)
+ * - Helpers (getBody, query, getUser, hasPermission, fetchAll, fetchOne, loadClass)
+ * - Diferentes respuestas (ok, created, noContent, badRequest, notFound, error, json)
+ *
+ * Genera endpoints en: /reportes/demo-reportes/*
+ */
+
+use EasyApi\EasyApiResource;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
+
+class DemoReportesResource extends EasyApiResource
+{
+    /**
+     * Descripción del recurso (aparece en Swagger junto al tag)
+     */
+    protected $description = 'Ejemplo COMPLETO de todas las capacidades EAPI';
+
+    /**
+     * ¿Rutas públicas por defecto? (false = requieren auth)
+     */
+    protected $publicByDefault = false;
+
+    /**
+     * Permiso por defecto para todas las rutas (opcional)
+     * Formato: 'modulo->permiso'
+     */
+    protected $defaultPermission = null; // 'societe->lire';
+
+    /**
+     * Método de inicialización - se ejecuta antes de registerRoutes()
+     * Útil para cargar clases o configurar cosas
+     */
+    protected function init(): void
+    {
+        // Ejemplo: cargar una clase de Dolibarr que necesitemos
+        // $this->loadClass('/societe/class/societe.class.php');
+
+        // Log de inicialización
+        $this->log('DemoReportesResource inicializado', LOG_DEBUG);
+    }
+
+    /**
+     * Registrar todas las rutas del recurso
+     */
+    protected function registerRoutes(): void
+    {
+        // =====================================================================
+        // IMPORTANTE: Registrar rutas estáticas ANTES que rutas con {parámetros}
+        // =====================================================================
+
+        // =====================================================================
+        // 2. RUTAS PÚBLICAS (Sin autenticación)
+        // =====================================================================
+
+        $this->get('/public/ping', 'Ping público', function ($req, $res) {
+            return $this->ok($res, array(
+                'pong' => true,
+                'timestamp' => time(),
+                'datetime' => date('Y-m-d H:i:s'),
+                'message' => 'Este endpoint NO requiere autenticación'
+            ));
+        })
+        ->public()
+        ->tags('Reportes - Públicos')
+        ->describe('Endpoint público para verificar que la API está funcionando.');
+
+        $this->get('/public/version', 'Versión de la API', function ($req, $res) {
+            return $this->ok($res, array(
+                'api' => 'EasyAPI',
+                'version' => '1.0.0',
+                'module' => $this->moduleName,
+                'dolibarr' => DOL_VERSION
+            ));
+        })
+        ->public()
+        ->tags('Reportes - Públicos');
+
+        // =====================================================================
+        // 3. RUTAS CON PERMISOS (estáticas - sin {parámetros})
+        // =====================================================================
+
+        // Requiere permiso de lectura de facturas
+        $this->get('/facturas', 'Listar facturas', function ($req, $res) {
+            $user = $this->getUser($req);
+
+            return $this->ok($res, array(
+                'message' => 'Tienes permiso para ver facturas',
+                'user' => $user->login,
+                'facturas' => array(
+                    array('id' => 1, 'ref' => 'FA2025-001', 'total' => 1500.00),
+                    array('id' => 2, 'ref' => 'FA2025-002', 'total' => 2300.50)
+                )
+            ));
+        })
+        ->requirePermission('facture->lire')
+        ->tags('Reportes - Con Permisos')
+        ->describe('Requiere permiso facture->lire para acceder.');
+
+        // Requiere permiso de crear terceros
+        // Schema de validación (reutilizable para body() y validateBody())
+        $terceroSchema = array(
+            'required' => array('nom'),
+            'properties' => array(
+                'nom' => array('type' => 'string', 'minLength' => 2, 'maxLength' => 100, 'description' => 'Nombre del tercero'),
+                'email' => array('type' => 'string', 'format' => 'email', 'description' => 'Email del tercero')
+            )
+        );
+
+        $this->post('/terceros', 'Crear tercero', function ($req, $res) use ($terceroSchema) {
+            // Validación automática con validateBody()
+            $validation = $this->validateBody($req, $terceroSchema);
+
+            if (!$validation['valid']) {
+                return $this->badRequest($res, $validation['error']);
+            }
+
+            // $validation['data'] contiene el body validado y saneado
+            return $this->created($res, array(
+                'message' => 'Tercero creado (simulado)',
+                'data' => $validation['data']
+            ));
+        })
+        ->requirePermission('societe->creer')
+        ->tags('Reportes - Con Permisos')
+        ->body($terceroSchema)
+        ->describe('Requiere permiso societe->creer para crear terceros. Usa validateBody() para validación automática.');
+
+        // Requiere CUALQUIERA de los permisos (OR)
+        $this->get('/documentos', 'Ver documentos', function ($req, $res) {
+            return $this->ok($res, array(
+                'message' => 'Tienes al menos uno de los permisos requeridos',
+                'documentos' => array()
+            ));
+        })
+        ->requirePermission(array('facture->lire', 'commande->lire', 'propal->lire'), 'any')
+        ->tags('Reportes - Con Permisos')
+        ->describe('Requiere AL MENOS UNO de: facture->lire, commande->lire o propal->lire');
+
+        // Requiere TODOS los permisos (AND)
+        $this->get('/contabilidad', 'Acceso contabilidad', function ($req, $res) {
+            return $this->ok($res, array(
+                'message' => 'Tienes TODOS los permisos de contabilidad',
+                'data' => array()
+            ));
+        })
+        ->requirePermission(array('compta->resultat->lire', 'compta->ventilation->lire'), 'all')
+        ->tags('Reportes - Con Permisos')
+        ->describe('Requiere TODOS: compta->resultat->lire Y compta->ventilation->lire');
+
+        // =====================================================================
+        // 4. RUTAS CON MIDDLEWARE PERSONALIZADO
+        // =====================================================================
+
+        // Middleware de logging
+        $loggingMiddleware = function (Request $request, RequestHandler $handler): Response {
+            $start = microtime(true);
+            dol_syslog('EAPI Demo: Request started - ' . $request->getUri()->getPath(), LOG_DEBUG);
+
+            $response = $handler->handle($request);
+
+            $duration = round((microtime(true) - $start) * 1000, 2);
+            dol_syslog("EAPI Demo: Request completed in {$duration}ms", LOG_DEBUG);
+
+            return $response->withHeader('X-Response-Time', $duration . 'ms');
+        };
+
+        $this->get('/con-logging', 'Endpoint con logging', function ($req, $res) {
+            return $this->ok($res, array(
+                'message' => 'Este endpoint tiene middleware de logging',
+                'check_header' => 'Revisa el header X-Response-Time en la respuesta'
+            ));
+        })
+        ->middleware($loggingMiddleware)
+        ->tags('Reportes - Middleware')
+        ->describe('Incluye un middleware que mide el tiempo de respuesta.');
+
+        // Middleware de caché simulado
+        $cacheMiddleware = function (Request $request, RequestHandler $handler): Response {
+            $response = $handler->handle($request);
+            return $response
+                ->withHeader('X-Cache', 'MISS')
+                ->withHeader('Cache-Control', 'public, max-age=3600');
+        };
+
+        $this->get('/con-cache', 'Endpoint con caché', function ($req, $res) {
+            return $this->ok($res, array(
+                'message' => 'Este endpoint tiene headers de caché',
+                'generated_at' => date('Y-m-d H:i:s'),
+                'cache_duration' => '3600 segundos'
+            ));
+        })
+        ->middleware($cacheMiddleware)
+        ->tags('Reportes - Middleware')
+        ->describe('Añade headers de caché a la respuesta.');
+
+        // Middleware de validación de header
+        $requireHeaderMiddleware = function (Request $request, RequestHandler $handler): Response {
+            $customHeader = $request->getHeaderLine('X-Custom-Token');
+
+            if (empty($customHeader)) {
+                $response = new \Slim\Psr7\Response();
+                $response = $response->withStatus(400);
+                $response = $response->withHeader('Content-Type', 'application/json');
+                $response->getBody()->write(json_encode(array(
+                    'success' => false,
+                    'error' => array(
+                        'code' => 400,
+                        'message' => 'Header X-Custom-Token es requerido'
+                    )
+                )));
+                return $response;
+            }
+
+            $request = $request->withAttribute('custom_token', $customHeader);
+            return $handler->handle($request);
+        };
+
+        $this->get('/requiere-header', 'Endpoint con header requerido', function ($req, $res) {
+            $token = $req->getAttribute('custom_token');
+
+            return $this->ok($res, array(
+                'message' => 'Header X-Custom-Token recibido correctamente',
+                'token_received' => $token
+            ));
+        })
+        ->middleware($requireHeaderMiddleware)
+        ->tags('Reportes - Middleware')
+        ->describe('Requiere el header X-Custom-Token.');
+
+        // =====================================================================
+        // 5. TAGS PERSONALIZADOS - Estadísticas
+        // =====================================================================
+
+        $this->get('/estadisticas/ventas', 'Estadísticas de ventas', function ($req, $res) {
+            return $this->ok($res, array(
+                'periodo' => date('Y-m'),
+                'total_ventas' => 150000.00,
+                'num_facturas' => 45,
+                'promedio' => 3333.33
+            ));
+        })
+        ->tags('Reportes - Estadísticas')
+        ->describe('Estadísticas de ventas del mes actual.');
+
+        $this->get('/estadisticas/clientes', 'Estadísticas de clientes', function ($req, $res) {
+            return $this->ok($res, array(
+                'total_clientes' => 234,
+                'nuevos_mes' => 12,
+                'activos' => 198
+            ));
+        })
+        ->tags('Reportes - Estadísticas');
+
+        // =====================================================================
+        // 6. EJEMPLO CON BASE DE DATOS
+        // =====================================================================
+
+        $this->get('/db/diccionario', 'Diccionario desde BD', function ($req, $res) {
+            $sql = "SELECT code, label FROM " . MAIN_DB_PREFIX . "c_country WHERE active = 1 LIMIT 10";
+            $paises = $this->fetchAll($sql);
+
+            return $this->ok($res, array(
+                'source' => 'Base de datos Dolibarr',
+                'table' => 'llx_c_country',
+                'paises' => $paises
+            ));
+        })
+        ->tags('Reportes - Base de Datos')
+        ->describe('Ejemplo de consulta a la base de datos usando fetchAll().');
+
+        // =====================================================================
+        // 7. EJEMPLO CON CLASES DE DOLIBARR
+        // =====================================================================
+
+        $this->get('/dolibarr/user-info', 'Info usuario Dolibarr', function ($req, $res) {
+            $user = $this->getUser($req);
+
+            if (!$user) {
+                return $this->unauthorized($res, 'Usuario no autenticado');
+            }
+
+            $permisos = array(
+                'facture->lire' => $this->hasPermission($req, 'facture->lire'),
+                'societe->lire' => $this->hasPermission($req, 'societe->lire'),
+                'produit->lire' => $this->hasPermission($req, 'produit->lire'),
+                'commande->lire' => $this->hasPermission($req, 'commande->lire')
+            );
+
+            return $this->ok($res, array(
+                'user' => array(
+                    'id' => $user->id,
+                    'login' => $user->login,
+                    'firstname' => $user->firstname,
+                    'lastname' => $user->lastname,
+                    'email' => $user->email,
+                    'admin' => (bool) $user->admin
+                ),
+                'permissions' => $permisos
+            ));
+        })
+        ->tags('Reportes - Dolibarr')
+        ->describe('Muestra información del usuario autenticado y sus permisos.');
+
+        $this->get('/dolibarr/modules', 'Módulos activos', function ($req, $res) {
+            global $conf;
+
+            $modules = array();
+            $checkModules = array('societe', 'facture', 'commande', 'propal', 'product', 'stock', 'projet');
+
+            foreach ($checkModules as $mod) {
+                $modules[$mod] = !empty($conf->$mod->enabled);
+            }
+
+            return $this->ok($res, array(
+                'dolibarr_version' => DOL_VERSION,
+                'modules' => $modules
+            ));
+        })
+        ->tags('Reportes - Dolibarr')
+        ->describe('Lista los módulos principales y si están activos.');
+
+        // =====================================================================
+        // 8. DIFERENTES TIPOS DE RESPUESTA
+        // =====================================================================
+
+        $this->get('/responses/ok', 'Respuesta OK', function ($req, $res) {
+            return $this->ok($res, array('status' => 'ok'));
+        })->tags('Reportes - Respuestas');
+
+        $this->post('/responses/created', 'Respuesta Created', function ($req, $res) {
+            return $this->created($res, array('id' => 123, 'status' => 'created'));
+        })->tags('Reportes - Respuestas');
+
+        $this->delete('/responses/no-content', 'Respuesta No Content', function ($req, $res) {
+            return $this->noContent($res);
+        })->tags('Reportes - Respuestas')->describe('Devuelve 204 sin body.');
+
+        $this->get('/responses/bad-request', 'Respuesta Bad Request', function ($req, $res) {
+            return $this->badRequest($res, 'Esto es un error 400 de ejemplo');
+        })->tags('Reportes - Respuestas');
+
+        $this->get('/responses/unauthorized', 'Respuesta Unauthorized', function ($req, $res) {
+            return $this->unauthorized($res, 'No autorizado (simulado)');
+        })->tags('Reportes - Respuestas');
+
+        $this->get('/responses/forbidden', 'Respuesta Forbidden', function ($req, $res) {
+            return $this->forbidden($res, 'Acceso prohibido (simulado)');
+        })->tags('Reportes - Respuestas');
+
+        $this->get('/responses/not-found', 'Respuesta Not Found', function ($req, $res) {
+            return $this->notFound($res, 'Recurso no encontrado (simulado)');
+        })->tags('Reportes - Respuestas');
+
+        $this->get('/responses/error', 'Respuesta Error', function ($req, $res) {
+            return $this->error($res, 'Error interno (simulado)');
+        })->tags('Reportes - Respuestas');
+
+        $this->get('/responses/custom', 'Respuesta Custom', function ($req, $res) {
+            return $this->json($res, array(
+                'custom' => true,
+                'code' => 'CUSTOM_RESPONSE',
+                'data' => array('foo' => 'bar')
+            ), 200);
+        })->tags('Reportes - Respuestas')->describe('Respuesta JSON personalizada.');
+
+        // =====================================================================
+        // 9. INFO DEL RECURSO
+        // =====================================================================
+
+        $this->get('/meta', 'Metadatos del recurso', function ($req, $res) {
+            return $this->ok($res, array(
+                'module' => $this->moduleName,
+                'resource' => $this->resourceName,
+                'prefix' => $this->prefix,
+                'tags' => $this->defaultTags,
+                'public_by_default' => $this->publicByDefault,
+                'default_permission' => $this->defaultPermission,
+                'description' => $this->description
+            ));
+        })
+        ->tags('Reportes - Meta')
+        ->describe('Muestra información interna del propio recurso EAPI.');
+
+        // =====================================================================
+        // 1. RUTAS CRUD BÁSICAS (con {parámetros} - VAN AL FINAL)
+        // =====================================================================
+
+        // GET simple - Listado
+        $this->get('/', 'Listar items', function ($req, $res) {
+            $limit = (int) $this->query($req, 'limit', 10);
+            $offset = (int) $this->query($req, 'offset', 0);
+            $search = $this->query($req, 'search', '');
+
+            $items = array();
+            for ($i = 1; $i <= $limit; $i++) {
+                $items[] = array(
+                    'id' => $offset + $i,
+                    'name' => 'Item #' . ($offset + $i),
+                    'created' => date('Y-m-d H:i:s')
+                );
+            }
+
+            return $this->ok($res, array(
+                'items' => $items,
+                'pagination' => array(
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'total' => 100
+                ),
+                'search' => $search
+            ));
+        })
+        ->queryParams(array(
+            'limit' => array('type' => 'integer', 'description' => 'Límite de resultados (default: 10)'),
+            'offset' => array('type' => 'integer', 'description' => 'Offset para paginación'),
+            'search' => array('type' => 'string', 'description' => 'Búsqueda por nombre')
+        ))
+        ->describe('Obtiene un listado paginado de items con soporte de búsqueda.');
+
+        // POST - Crear (no tiene conflicto con GET /{id})
+        // Schema de validación completo con todas las opciones
+        $itemSchema = array(
+            'required' => array('name'),
+            'properties' => array(
+                'name' => array(
+                    'type' => 'string',
+                    'minLength' => 2,
+                    'maxLength' => 100,
+                    'description' => 'Nombre del item'
+                ),
+                'description' => array(
+                    'type' => 'string',
+                    'maxLength' => 500,
+                    'description' => 'Descripción opcional'
+                ),
+                'status' => array(
+                    'type' => 'string',
+                    'enum' => array('active', 'inactive', 'pending'),
+                    'description' => 'Estado: active, inactive, pending'
+                )
+            )
+        );
+
+        $this->post('/', 'Crear item', function ($req, $res) use ($itemSchema) {
+            $user = $this->getUser($req);
+
+            // Validación automática con validateBody()
+            $validation = $this->validateBody($req, $itemSchema);
+
+            if (!$validation['valid']) {
+                // Puedes usar $validation['error'] (primer error) o $validation['errors'] (todos)
+                return $this->badRequest($res, $validation['error']);
+            }
+
+            $data = $validation['data'];
+            $newId = rand(1000, 9999);
+            $this->log("Item #$newId creado por " . ($user ? $user->login : 'unknown'), LOG_INFO);
+
+            return $this->created($res, array(
+                'id' => $newId,
+                'name' => $data['name'],
+                'description' => isset($data['description']) ? $data['description'] : null,
+                'status' => isset($data['status']) ? $data['status'] : 'active',
+                'created_by' => $user ? $user->login : 'unknown',
+                'created_at' => date('Y-m-d H:i:s')
+            ));
+        })
+        ->body($itemSchema)
+        ->describe('Crea un nuevo item. Usa validateBody() para validación automática.');
+
+        // Ruta con parámetro para DB config (estática con subruta)
+        $this->get('/db/config/{key}', 'Leer configuración', function ($req, $res, $args) {
+            $key = $args['key'];
+            $sql = "SELECT name, value FROM " . MAIN_DB_PREFIX . "const WHERE name = '" . $this->db->escape($key) . "'";
+            $config = $this->fetchOne($sql);
+
+            if (!$config) {
+                return $this->notFound($res, "Configuración '$key' no encontrada");
+            }
+
+            return $this->ok($res, array(
+                'key' => $config['name'],
+                'value' => $config['value']
+            ));
+        })
+        ->pathParams(array(
+            'key' => array('type' => 'string', 'description' => 'Nombre de la constante (ej: MAIN_LANG_DEFAULT)')
+        ))
+        ->tags('Reportes - Base de Datos')
+        ->describe('Lee una constante de configuración de Dolibarr.');
+
+        // =====================================================================
+        // RUTAS CON {id} - SIEMPRE AL FINAL para evitar conflictos
+        // =====================================================================
+
+        // GET con parámetro - Ver detalle
+        $this->get('/{id}', 'Ver item', function ($req, $res, $args) {
+            $id = (int) $args['id'];
+
+            if ($id === 404) {
+                return $this->notFound($res, "Item #$id no encontrado");
+            }
+            if ($id === 500) {
+                return $this->error($res, 'Error interno simulado');
+            }
+
+            return $this->ok($res, array(
+                'id' => $id,
+                'name' => "Item #$id",
+                'description' => 'Descripción del item',
+                'status' => 'active',
+                'created_at' => '2025-01-01 00:00:00',
+                'updated_at' => date('Y-m-d H:i:s')
+            ));
+        })
+        ->pathParams(array(
+            'id' => array('type' => 'integer', 'description' => 'ID del item (use 404 para simular no encontrado)')
+        ))
+        ->describe('Obtiene los detalles de un item específico por su ID.');
+
+        // PUT - Actualizar completo
+        $this->put('/{id}', 'Actualizar item', function ($req, $res, $args) {
+            $id = (int) $args['id'];
+            $body = $this->getBody($req);
+
+            if ($id === 404) {
+                return $this->notFound($res, "Item #$id no existe");
+            }
+
+            return $this->ok($res, array(
+                'id' => $id,
+                'name' => isset($body['name']) ? $body['name'] : 'Sin nombre',
+                'description' => isset($body['description']) ? $body['description'] : null,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'message' => 'Item actualizado completamente'
+            ));
+        })
+        ->pathParams(array(
+            'id' => array('type' => 'integer', 'description' => 'ID del item a actualizar')
+        ))
+        ->body(array(
+            'required' => array('name'),
+            'properties' => array(
+                'name' => array('type' => 'string'),
+                'description' => array('type' => 'string'),
+                'status' => array('type' => 'string')
+            )
+        ));
+
+        // PATCH - Actualizar parcial
+        $this->patch('/{id}', 'Actualizar parcialmente', function ($req, $res, $args) {
+            $id = (int) $args['id'];
+            $body = $this->getBody($req);
+
+            return $this->ok($res, array(
+                'id' => $id,
+                'updated_fields' => array_keys($body),
+                'updated_at' => date('Y-m-d H:i:s'),
+                'message' => 'Campos actualizados: ' . implode(', ', array_keys($body))
+            ));
+        })
+        ->pathParams(array(
+            'id' => array('type' => 'integer', 'description' => 'ID del item')
+        ))
+        ->body(array(
+            'properties' => array(
+                'name' => array('type' => 'string'),
+                'description' => array('type' => 'string'),
+                'status' => array('type' => 'string')
+            )
+        ))
+        ->describe('Actualiza solo los campos enviados, sin afectar los demás.');
+
+        // DELETE - Eliminar
+        $this->delete('/{id}', 'Eliminar item', function ($req, $res, $args) {
+            $id = (int) $args['id'];
+
+            if ($id === 404) {
+                return $this->notFound($res, "Item #$id no existe");
+            }
+
+            $this->log("Item #$id eliminado", LOG_WARNING);
+            return $this->noContent($res);
+        })
+        ->pathParams(array(
+            'id' => array('type' => 'integer', 'description' => 'ID del item a eliminar')
+        ))
+        ->describe('Elimina un item. Devuelve 204 No Content si es exitoso.');
+    }
+}

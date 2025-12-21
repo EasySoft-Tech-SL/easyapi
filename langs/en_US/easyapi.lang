@@ -1,0 +1,63 @@
+# Copyright (C) 2025 Alberto Luque Rivas <aluquerivasdev@gmail.com> | EasySoft Tech S.L <info@easysoft.es>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+#
+# Generic
+#
+
+# Module label 'ModuleEasyapiName'
+ModuleEasyapiName = EasyAPI
+# Module description 'ModuleEasyapiDesc'
+ModuleEasyapiDesc = Headless REST API for Dolibarr with Slim Framework - Extensible via Hooks
+
+#
+# Admin page
+#
+EasyapiSetup = EasyAPI Setup
+Settings = Settings
+EasyapiSetupPage = Configure EasyAPI module settings
+EasyapiAPISetup = API Configuration
+EasyapiAPISetupPage = Configure REST API settings (CORS, Rate Limiting, Logging)
+
+# API Config
+EASYAPI_CORS_ENABLED = Enable CORS
+EASYAPI_CORS_ORIGIN = Allowed Origin
+EASYAPI_RATE_LIMIT_ENABLED = Enable Rate Limiting
+EASYAPI_RATE_LIMIT_MAX = Max Requests
+EASYAPI_RATE_LIMIT_WINDOW = Time Window (seconds)
+EASYAPI_LOG_ENABLED = Enable Logging
+EASYAPI_LOG_FILE = Log File Path
+EASYAPI_DEBUG = Debug Mode
+EASYAPI_PUBLIC_ROUTES = Public Routes
+
+
+#
+# About page
+#
+About = About
+EasyapiAbout = About Easyapi
+EasyapiAboutPage = Easyapi about page
+
+#
+# Sample page
+#
+EasyapiArea = Home Easyapi
+MyPageName = My page name
+
+#
+# Sample widget
+#
+MyWidget = My widget
+MyWidgetDescription = My widget description

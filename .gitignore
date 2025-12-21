@@ -1,0 +1,44 @@
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp_build/
+
+# Composer (keep vendor in repo for distribution)
+# vendor/
+
+# PHP
+*.cache
+*.php.bak
+
+# Build artifacts
+*.zip
+!module_*.zip
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+phpunit.xml
+.phpunit.result.cache
+coverage/
+
+# Node (if any frontend tools)
+node_modules/
+npm-debug.log
+yarn-error.log

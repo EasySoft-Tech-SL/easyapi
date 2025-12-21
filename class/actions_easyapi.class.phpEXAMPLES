@@ -1,0 +1,875 @@
+<?php
+/* Copyright (C) 2025 Alberto Luque Rivas <aluquerivasdev@gmail.com>
+ *
+ * EasyAPI - Clase de Hooks
+ *
+ * Esta clase permite que el módulo EasyAPI reciba hooks de otros módulos
+ * y también proporciona el hook context 'easyapi' para que otros módulos
+ * puedan registrar sus propios endpoints.
+ *
+ * CÓMO USAR DESDE OTRO MÓDULO:
+ *
+ * 1. En tu modXXX.class.php añadir:
+ *    'hooks' => array('easyapi')
+ *
+ * 2. Crear class/actions_xxx.class.php con:
+ *    public function easyapiRegisterRoutes($parameters, &$object, &$action, $hookmanager)
+ *    {
+ *        $app = $parameters['app'];  // Instancia Slim
+ *        $db = $parameters['db'];    // DoliDB
+ *        $api = $parameters['api'];  // ApiEasyApi
+ *
+ *        // Registrar tus rutas
+ *        $app->group('/mimodulo', function($group) use ($db, $api) {
+ *            $group->get('/miendpoint', function($req, $res) use ($db, $api) {
+ *                return $api->successResponse($res, ['hello' => 'world']);
+ *            });
+ *        });
+ *
+ *        // Documentar las rutas
+ *        $api->addRoute(array('method' => 'GET', 'path' => '/mimodulo/miendpoint', ...));
+ *
+ *        return 0;
+ *    }
+ */
+
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
+
+/**
+ * Clase de acciones/hooks del módulo EasyAPI
+ */
+class ActionsEasyapi
+{
+    /** @var \DoliDB */
+    public $db;
+
+    /** @var string */
+    public $error = '';
+
+    /** @var array */
+    public $errors = array();
+
+    /** @var array Resultados de hooks */
+    public $results = array();
+
+    /** @var string Resultado de última acción */
+    public $resprints = '';
+
+    /** @var bool Control para evitar registro duplicado de rutas */
+    private static $routesRegistered = false;
+
+    /**
+     * Constructor
+     *
+     * @param \DoliDB $db Database handler
+     */
+    public function __construct($db)
+    {
+        $this->db = $db;
+    }
+
+    /**
+     * Hook para permitir que otros módulos registren rutas en EasyAPI
+     *
+     * Este hook se ejecuta cuando EasyAPI inicializa su aplicación Slim.
+     * Los módulos externos pueden engancharse aquí para añadir sus propios endpoints.
+     *
+     * @param array $parameters Parámetros del hook:
+     *                          - app: Instancia de Slim\App
+     *                          - db: Conexión DoliDB
+     *                          - api: Instancia de ApiEasyApi
+     *                          - config: Configuración del módulo
+     * @param object $object Objeto que ejecuta el hook (ApiEasyApi)
+     * @param string $action Acción actual
+     * @param HookManager $hookmanager Gestor de hooks
+     * @return int 0=OK, <0=Error
+     */
+    public function easyapiRegisterRoutes($parameters, &$object, &$action, $hookmanager)
+    {
+        // Evitar registro duplicado de rutas (el hook puede ejecutarse múltiples veces)
+        if (self::$routesRegistered) {
+            return 0;
+        }
+        self::$routesRegistered = true;
+
+        $app = $parameters['app'];
+        $db = $parameters['db'];
+        $api = $parameters['api'];
+
+        dol_syslog("EasyAPI: easyapiRegisterRoutes hook executed - registering example routes", LOG_DEBUG);
+
+        // =====================================================================
+        // EJEMPLO 0: Endpoint con Middleware personalizado aplicado
+        // =====================================================================
+        // Este endpoint tiene un middleware que añade headers de tiempo de ejecución
+        $app->get('/example/with-middleware', function (Request $request, Response $response) use ($api) {
+            return $api->successResponse($response, array(
+                'message' => 'Este endpoint tiene middleware personalizado',
+                'check_headers' => 'Revisa los headers X-Processing-Time-Ms y X-Custom-Module'
+            ));
+        })->add(new ExampleTimingMiddleware('example-module'));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/with-middleware',
+            'summary' => 'Endpoint con middleware',
+            'description' => 'Demuestra cómo aplicar un middleware personalizado a una ruta específica. Revisa los headers de respuesta.',
+            'tags' => array('Examples - Middleware'),
+            'public' => false
+        ));
+
+        // Endpoint protegido con token personalizado
+        $app->get('/example/protected-token', function (Request $request, Response $response) use ($api) {
+            return $api->successResponse($response, array(
+                'message' => 'Acceso concedido',
+                'secret' => 'Este contenido solo es visible con el token correcto'
+            ));
+        })->add(new ExampleTokenMiddleware('mi-token-secreto-123'));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/protected-token',
+            'summary' => 'Endpoint protegido con token',
+            'description' => 'Requiere header X-Custom-Token: mi-token-secreto-123',
+            'tags' => array('Examples - Middleware'),
+            'parameters' => array(
+                array(
+                    'name' => 'X-Custom-Token',
+                    'in' => 'header',
+                    'required' => true,
+                    'description' => 'Token personalizado (valor: mi-token-secreto-123)',
+                    'schema' => array('type' => 'string')
+                )
+            )
+        ));
+
+        // Añadir tag para middleware examples
+        $openApi = $api->getOpenApiGenerator();
+        $openApi->addTag('Examples - Middleware', 'Ejemplos de endpoints con middleware personalizado');
+
+        // =====================================================================
+        // EJEMPLO 1: Endpoint simple
+        // =====================================================================
+        $app->get('/example/ping', function (Request $request, Response $response) use ($api) {
+            return $api->successResponse($response, array(
+                'message' => 'pong',
+                'timestamp' => time()
+            ));
+        });
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/ping',
+            'summary' => 'Ping endpoint',
+            'description' => 'Simple ping/pong test endpoint',
+            'tags' => array('Examples'),
+            'public' => false
+        ));
+
+        // =====================================================================
+        // EJEMPLO 2: Endpoint con parámetro
+        // =====================================================================
+        $app->get('/example/echo/{message}', function (Request $request, Response $response, array $args) use ($api) {
+            $message = $args['message'];
+            $user = $request->getAttribute('dolibarr_user');
+
+            return $api->successResponse($response, array(
+                'echo' => $message,
+                'from_user' => $user ? $user->login : 'anonymous',
+                'length' => strlen($message)
+            ));
+        });
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/echo/{message}',
+            'summary' => 'Echo message',
+            'description' => 'Returns the message sent in the URL',
+            'tags' => array('Examples'),
+            'parameters' => array(
+                array(
+                    'name' => 'message',
+                    'in' => 'path',
+                    'description' => 'Message to echo back',
+                    'required' => true,
+                    'schema' => array('type' => 'string')
+                )
+            )
+        ));
+
+        // =====================================================================
+        // EJEMPLO 3: Endpoint POST con body
+        // =====================================================================
+        $app->post('/example/reverse', function (Request $request, Response $response) use ($api) {
+            $body = json_decode((string) $request->getBody(), true);
+
+            if (empty($body['text'])) {
+                return $api->errorResponse($response, 'text field is required', 400);
+            }
+
+            return $api->successResponse($response, array(
+                'original' => $body['text'],
+                'reversed' => strrev($body['text'])
+            ));
+        });
+
+        $api->addRoute(array(
+            'method' => 'POST',
+            'path' => '/example/reverse',
+            'summary' => 'Reverse text',
+            'description' => 'Returns the text reversed',
+            'tags' => array('Examples'),
+            'requestBody' => array(
+                'required' => true,
+                'content' => array(
+                    'application/json' => array(
+                        'schema' => array(
+                            'type' => 'object',
+                            'required' => array('text'),
+                            'properties' => array(
+                                'text' => array('type' => 'string', 'example' => 'Hello World')
+                            )
+                        )
+                    )
+                )
+            )
+        ));
+
+        // =====================================================================
+        // EJEMPLO 4: Group de rutas - Sistema de notas simple
+        // =====================================================================
+        $app->group('/example/notes', function ($group) use ($db, $api) {
+
+            // GET /example/notes - Listar notas (simulado)
+            $group->get('', function (Request $request, Response $response) use ($db, $api) {
+                $user = $request->getAttribute('dolibarr_user');
+
+                // Ejemplo: datos simulados
+                $notes = array(
+                    array('id' => 1, 'title' => 'Primera nota', 'content' => 'Contenido de ejemplo', 'user_id' => $user->id),
+                    array('id' => 2, 'title' => 'Segunda nota', 'content' => 'Más contenido', 'user_id' => $user->id),
+                );
+
+                // Ejemplo de paginación
+                $queryParams = $request->getQueryParams();
+                $page = isset($queryParams['page']) ? (int) $queryParams['page'] : 1;
+                $limit = isset($queryParams['limit']) ? (int) $queryParams['limit'] : 10;
+
+                return $api->paginatedResponse($response, $notes, count($notes), $page, $limit);
+            });
+
+            // GET /example/notes/{id} - Obtener una nota
+            $group->get('/{id:[0-9]+}', function (Request $request, Response $response, array $args) use ($api) {
+                $id = (int) $args['id'];
+
+                // Simulación
+                if ($id > 10) {
+                    return $api->errorResponse($response, 'Note not found', 404);
+                }
+
+                return $api->successResponse($response, array(
+                    'id' => $id,
+                    'title' => 'Nota #' . $id,
+                    'content' => 'Contenido de la nota ' . $id,
+                    'created_at' => date('c')
+                ));
+            });
+
+            // POST /example/notes - Crear nota
+            $group->post('', function (Request $request, Response $response) use ($api) {
+                $body = json_decode((string) $request->getBody(), true);
+                $user = $request->getAttribute('dolibarr_user');
+
+                if (empty($body['title'])) {
+                    return $api->errorResponse($response, 'title is required', 400);
+                }
+
+                // Simulación de creación
+                $newNote = array(
+                    'id' => rand(100, 999),
+                    'title' => $body['title'],
+                    'content' => isset($body['content']) ? $body['content'] : '',
+                    'user_id' => $user->id,
+                    'created_at' => date('c')
+                );
+
+                return $api->successResponse($response, $newNote, 201);
+            });
+
+            // PUT /example/notes/{id} - Actualizar nota
+            $group->put('/{id:[0-9]+}', function (Request $request, Response $response, array $args) use ($api) {
+                $id = (int) $args['id'];
+                $body = json_decode((string) $request->getBody(), true);
+
+                if ($id > 10) {
+                    return $api->errorResponse($response, 'Note not found', 404);
+                }
+
+                return $api->successResponse($response, array(
+                    'id' => $id,
+                    'title' => isset($body['title']) ? $body['title'] : 'Updated',
+                    'content' => isset($body['content']) ? $body['content'] : '',
+                    'updated_at' => date('c')
+                ));
+            });
+
+            // DELETE /example/notes/{id} - Eliminar nota
+            $group->delete('/{id:[0-9]+}', function (Request $request, Response $response, array $args) use ($api) {
+                $id = (int) $args['id'];
+
+                if ($id > 10) {
+                    return $api->errorResponse($response, 'Note not found', 404);
+                }
+
+                return $api->successResponse($response, array(
+                    'deleted' => true,
+                    'id' => $id
+                ));
+            });
+        });
+
+        // Documentar el grupo de notas
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/notes',
+            'summary' => 'List notes',
+            'description' => 'Get a paginated list of notes',
+            'tags' => array('Examples - Notes'),
+            'parameters' => array(
+                array('name' => 'page', 'in' => 'query', 'schema' => array('type' => 'integer', 'default' => 1)),
+                array('name' => 'limit', 'in' => 'query', 'schema' => array('type' => 'integer', 'default' => 10))
+            )
+        ));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/notes/{id}',
+            'summary' => 'Get note',
+            'description' => 'Get a single note by ID',
+            'tags' => array('Examples - Notes'),
+            'parameters' => array(
+                array('name' => 'id', 'in' => 'path', 'required' => true, 'schema' => array('type' => 'integer'))
+            )
+        ));
+
+        $api->addRoute(array(
+            'method' => 'POST',
+            'path' => '/example/notes',
+            'summary' => 'Create note',
+            'description' => 'Create a new note',
+            'tags' => array('Examples - Notes'),
+            'requestBody' => array(
+                'required' => true,
+                'content' => array(
+                    'application/json' => array(
+                        'schema' => array(
+                            'type' => 'object',
+                            'required' => array('title'),
+                            'properties' => array(
+                                'title' => array('type' => 'string', 'example' => 'Mi nota'),
+                                'content' => array('type' => 'string', 'example' => 'Contenido...')
+                            )
+                        )
+                    )
+                )
+            )
+        ));
+
+        $api->addRoute(array(
+            'method' => 'PUT',
+            'path' => '/example/notes/{id}',
+            'summary' => 'Update note',
+            'description' => 'Update an existing note',
+            'tags' => array('Examples - Notes'),
+            'parameters' => array(
+                array('name' => 'id', 'in' => 'path', 'required' => true, 'schema' => array('type' => 'integer'))
+            )
+        ));
+
+        $api->addRoute(array(
+            'method' => 'DELETE',
+            'path' => '/example/notes/{id}',
+            'summary' => 'Delete note',
+            'description' => 'Delete a note by ID',
+            'tags' => array('Examples - Notes'),
+            'parameters' => array(
+                array('name' => 'id', 'in' => 'path', 'required' => true, 'schema' => array('type' => 'integer'))
+            )
+        ));
+
+        // =====================================================================
+        // EJEMPLO 5: Endpoint con verificación de permisos (forma manual)
+        // =====================================================================
+        $app->get('/example/admin-only', function (Request $request, Response $response) use ($api) {
+            // Verificar que el usuario es admin
+            $user = $request->getAttribute('dolibarr_user');
+
+            if (!$user->admin) {
+                return $api->errorResponse($response, 'Admin access required', 403);
+            }
+
+            return $api->successResponse($response, array(
+                'message' => 'Welcome, admin!',
+                'admin_user' => $user->login,
+                'server_time' => date('c')
+            ));
+        });
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/admin-only',
+            'summary' => 'Admin only endpoint',
+            'description' => 'This endpoint requires admin privileges',
+            'tags' => array('Examples')
+        ));
+
+        // =====================================================================
+        // EJEMPLO 6: Endpoints con RequirePermission middleware
+        // =====================================================================
+
+        // Cargar el middleware de permisos
+        require_once DOL_DOCUMENT_ROOT . '/custom/easyapi/middleware/RequirePermission.php';
+
+        // Endpoint que requiere permiso de leer facturas
+        $app->get('/example/invoices-read', function (Request $request, Response $response) use ($api, $db) {
+            // Aquí el usuario ya tiene el permiso verificado por el middleware
+            $user = $request->getAttribute('dolibarr_user');
+
+            return $api->successResponse($response, array(
+                'message' => 'You have permission to read invoices',
+                'user' => $user->login,
+                'permission_checked' => 'facture->lire'
+            ));
+        })->add(\EasyAPI\Middleware\RequirePermission::check('facture->lire'));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/invoices-read',
+            'summary' => 'Read invoices (requires permission)',
+            'description' => 'This endpoint requires the "facture->lire" permission in Dolibarr',
+            'tags' => array('Examples - Permissions'),
+            'permissions' => 'facture->lire'
+        ));
+
+        // Endpoint que requiere permiso de crear terceros
+        $app->post('/example/create-thirdparty', function (Request $request, Response $response) use ($api) {
+            $body = json_decode((string) $request->getBody(), true);
+            $user = $request->getAttribute('dolibarr_user');
+
+            // Simulación de creación
+            return $api->successResponse($response, array(
+                'message' => 'Third party would be created here',
+                'name' => isset($body['name']) ? $body['name'] : 'Test',
+                'created_by' => $user->login,
+                'permission_verified' => 'societe->creer'
+            ), 201);
+        })->add(\EasyAPI\Middleware\RequirePermission::check('societe->creer'));
+
+        $api->addRoute(array(
+            'method' => 'POST',
+            'path' => '/example/create-thirdparty',
+            'summary' => 'Create thirdparty (requires permission)',
+            'description' => 'Requires "societe->creer" permission to create third parties',
+            'tags' => array('Examples - Permissions'),
+            'permissions' => 'societe->creer',
+            'requestBody' => array(
+                'required' => true,
+                'content' => array(
+                    'application/json' => array(
+                        'schema' => array(
+                            'type' => 'object',
+                            'properties' => array(
+                                'name' => array('type' => 'string', 'example' => 'ACME Corp')
+                            )
+                        )
+                    )
+                )
+            )
+        ));
+
+        // Endpoint que requiere CUALQUIERA de varios permisos (modo ANY)
+        $app->get('/example/documents-any', function (Request $request, Response $response) use ($api) {
+            $user = $request->getAttribute('dolibarr_user');
+
+            return $api->successResponse($response, array(
+                'message' => 'You have at least one of the required permissions',
+                'user' => $user->login,
+                'permissions_any_of' => 'facture->lire, commande->lire, propal->lire'
+            ));
+        })->add(\EasyAPI\Middleware\RequirePermission::any('facture->lire,commande->lire,propal->lire'));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/documents-any',
+            'summary' => 'Access with any document permission',
+            'description' => 'Requires ANY of: facture->lire, commande->lire, or propal->lire',
+            'tags' => array('Examples - Permissions'),
+            'permissions' => 'facture->lire,commande->lire,propal->lire'
+        ));
+
+        // Endpoint que requiere TODOS los permisos (modo ALL)
+        $app->get('/example/full-accounting', function (Request $request, Response $response) use ($api) {
+            $user = $request->getAttribute('dolibarr_user');
+
+            return $api->successResponse($response, array(
+                'message' => 'You have ALL required accounting permissions',
+                'user' => $user->login,
+                'permissions_all' => 'facture->lire, banque->lire'
+            ));
+        })->add(\EasyAPI\Middleware\RequirePermission::all('facture->lire,banque->lire'));
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/full-accounting',
+            'summary' => 'Full accounting access (all permissions)',
+            'description' => 'Requires ALL of: facture->lire AND banque->lire',
+            'tags' => array('Examples - Permissions'),
+            'permissions' => 'facture->lire,banque->lire'
+        ));
+
+        // Endpoint público (visible sin autenticación en /docs)
+        $app->get('/example/public-info', function (Request $request, Response $response) use ($api) {
+            global $conf;
+
+            return $api->successResponse($response, array(
+                'message' => 'This is public information',
+                'api_version' => '1.0.0',
+                'dolibarr_version' => DOL_VERSION,
+                'timestamp' => time()
+            ));
+        });
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/public-info',
+            'summary' => 'Public information endpoint',
+            'description' => 'This endpoint is public and visible in /docs without authentication',
+            'tags' => array('Examples - Permissions'),
+            'public' => true  // <-- Importante: marcado como público
+        ));
+
+        // Tag para ejemplos de permisos
+        $openApi = $api->getOpenApiGenerator();
+        $openApi->addTag('Examples - Permissions', 'Examples showing permission-based access control');
+
+        // =====================================================================
+        // EJEMPLO 7: Endpoint que usa clases de Dolibarr
+        // =====================================================================
+        $app->get('/example/dolibarr-info', function (Request $request, Response $response) use ($db, $api) {
+            global $conf;
+
+            // Información del sistema (sin datos sensibles)
+            $info = array(
+                'dolibarr_version' => DOL_VERSION,
+                'entity' => $conf->entity,
+                'currency' => (isset($conf->currency) ? $conf->currency : 'EUR'),
+                'modules_enabled' => array(),
+                'php_version' => PHP_VERSION
+            );
+
+            // Listar algunos módulos activos
+            $modules = array('societe', 'facture', 'commande', 'product', 'stock', 'projet');
+            foreach ($modules as $mod) {
+                if (isset($conf->$mod) && isset($conf->$mod->enabled) && $conf->$mod->enabled) {
+                    $info['modules_enabled'][] = $mod;
+                }
+            }
+
+            return $api->successResponse($response, $info);
+        });
+
+        $api->addRoute(array(
+            'method' => 'GET',
+            'path' => '/example/dolibarr-info',
+            'summary' => 'Dolibarr system info',
+            'description' => 'Returns basic Dolibarr system information',
+            'tags' => array('Examples')
+        ));
+
+        // Añadir tag personalizado para los ejemplos
+        $openApi = $api->getOpenApiGenerator();
+        $openApi->addTag('Examples', 'Example endpoints for testing and learning');
+        $openApi->addTag('Examples - Notes', 'CRUD example with a notes resource');
+
+        return 0;
+    }
+
+    /**
+     * Hook alternativo para compatibilidad con el nombre de la idea original
+     *
+     * @param array $parameters
+     * @param object $object
+     * @param string $action
+     * @param HookManager $hookmanager
+     * @return int
+     */
+    public function headlessApiRegisterRoutes($parameters, &$object, &$action, $hookmanager)
+    {
+        return $this->easyapiRegisterRoutes($parameters, $object, $action, $hookmanager);
+    }
+
+    /**
+     * Hook para añadir middleware personalizados
+     *
+     * @param array $parameters Contiene 'app' (Slim\App) y 'api' (ApiEasyApi)
+     * @param object $object
+     * @param string $action
+     * @param HookManager $hookmanager
+     * @return int
+     */
+    public function easyapiRegisterMiddleware($parameters, &$object, &$action, $hookmanager)
+    {
+        dol_syslog("EasyAPI: easyapiRegisterMiddleware hook executed", LOG_DEBUG);
+
+        return 0;
+    }
+
+    /**
+     * Hook ejecutado antes de procesar una petición
+     *
+     * @param array $parameters Contiene 'request' y 'api'
+     * @param object $object
+     * @param string $action
+     * @param HookManager $hookmanager
+     * @return int
+     */
+    public function easyapiBeforeRequest($parameters, &$object, &$action, $hookmanager)
+    {
+        return 0;
+    }
+
+    /**
+     * Hook ejecutado después de procesar una petición
+     *
+     * @param array $parameters Contiene 'request', 'response' y 'api'
+     * @param object $object
+     * @param string $action
+     * @param HookManager $hookmanager
+     * @return int
+     */
+    public function easyapiAfterRequest($parameters, &$object, &$action, $hookmanager)
+    {
+        return 0;
+    }
+}
+
+
+// =============================================================================
+// EJEMPLO DE MIDDLEWARE PERSONALIZADO
+// =============================================================================
+
+/**
+ * Middleware de ejemplo que añade un header personalizado a todas las respuestas
+ *
+ * Para usarlo, en tu hook easyapiRegisterRoutes:
+ * $app->add(new ExampleHeaderMiddleware());
+ */
+class ExampleHeaderMiddleware implements MiddlewareInterface
+{
+    /**
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response
+     */
+    public function process(Request $request, RequestHandler $handler): Response
+    {
+        // Antes de procesar la petición
+        $startTime = microtime(true);
+
+        // Procesar la petición
+        $response = $handler->handle($request);
+
+        // Después de procesar - añadir headers personalizados
+        $duration = round((microtime(true) - $startTime) * 1000, 2);
+
+        return $response
+            ->withHeader('X-EasyAPI-Example', 'true')
+            ->withHeader('X-Processing-Time-Ms', (string) $duration);
+    }
+}
+
+
+/**
+ * Middleware de ejemplo para logging de peticiones
+ *
+ * Para usarlo:
+ * $app->add(new ExampleLoggingMiddleware());
+ */
+class ExampleLoggingMiddleware implements MiddlewareInterface
+{
+    /**
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response
+     */
+    public function process(Request $request, RequestHandler $handler): Response
+    {
+        $method = $request->getMethod();
+        $path = $request->getUri()->getPath();
+
+        dol_syslog("EasyAPI Request: {$method} {$path}", LOG_INFO);
+
+        $response = $handler->handle($request);
+
+        $status = $response->getStatusCode();
+        dol_syslog("EasyAPI Response: {$method} {$path} -> {$status}", LOG_INFO);
+
+        return $response;
+    }
+}
+
+
+/**
+ * Middleware de ejemplo para validar un header personalizado
+ *
+ * Para usarlo (solo en rutas específicas):
+ * $app->get('/ruta', $callback)->add(new ExampleValidationMiddleware('mi-token-secreto'));
+ */
+class ExampleValidationMiddleware implements MiddlewareInterface
+{
+    /** @var string */
+    private $requiredToken;
+
+    /**
+     * @param string $token Token requerido
+     */
+    public function __construct(string $token)
+    {
+        $this->requiredToken = $token;
+    }
+
+    /**
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response
+     */
+    public function process(Request $request, RequestHandler $handler): Response
+    {
+        $token = $request->getHeaderLine('X-Custom-Token');
+
+        if ($token !== $this->requiredToken) {
+            $response = new \Slim\Psr7\Response();
+            $response = $response->withStatus(403);
+            $response = $response->withHeader('Content-Type', 'application/json');
+            $response->getBody()->write(json_encode(array(
+                'success' => false,
+                'error' => array(
+                    'code' => 403,
+                    'message' => 'Invalid or missing X-Custom-Token header'
+                )
+            )));
+            return $response;
+        }
+
+        return $handler->handle($request);
+    }
+}
+
+
+/**
+ * Middleware de ejemplo que mide el tiempo de ejecución
+ *
+ * Uso: $app->get('/ruta', $callback)->add(new ExampleTimingMiddleware('mi-modulo'));
+ *
+ * Añade headers:
+ * - X-Processing-Time-Ms: tiempo en milisegundos
+ * - X-Custom-Module: nombre del módulo
+ */
+class ExampleTimingMiddleware implements MiddlewareInterface
+{
+    /** @var string */
+    private $moduleName;
+
+    /**
+     * @param string $moduleName Nombre del módulo para el header
+     */
+    public function __construct(string $moduleName = 'easyapi')
+    {
+        $this->moduleName = $moduleName;
+    }
+
+    /**
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response
+     */
+    public function process(Request $request, RequestHandler $handler): Response
+    {
+        $startTime = microtime(true);
+
+        // Procesar la petición
+        $response = $handler->handle($request);
+
+        // Calcular tiempo de ejecución
+        $duration = round((microtime(true) - $startTime) * 1000, 2);
+
+        // Añadir headers informativos
+        return $response
+            ->withHeader('X-Processing-Time-Ms', (string) $duration)
+            ->withHeader('X-Custom-Module', $this->moduleName);
+    }
+}
+
+
+/**
+ * Middleware de ejemplo para validar token personalizado
+ *
+ * Uso: $app->get('/ruta', $callback)->add(new ExampleTokenMiddleware('token-secreto'));
+ *
+ * Requiere header: X-Custom-Token
+ */
+class ExampleTokenMiddleware implements MiddlewareInterface
+{
+    /** @var string */
+    private $expectedToken;
+
+    /**
+     * @param string $token Token esperado
+     */
+    public function __construct(string $token)
+    {
+        $this->expectedToken = $token;
+    }
+
+    /**
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response
+     */
+    public function process(Request $request, RequestHandler $handler): Response
+    {
+        $token = $request->getHeaderLine('X-Custom-Token');
+
+        if (empty($token)) {
+            return $this->errorResponse(400, 'Header X-Custom-Token es requerido');
+        }
+
+        if ($token !== $this->expectedToken) {
+            return $this->errorResponse(403, 'Token inválido');
+        }
+
+        // Token válido, continuar
+        return $handler->handle($request);
+    }
+
+    /**
+     * Genera respuesta de error
+     */
+    private function errorResponse(int $code, string $message): Response
+    {
+        $response = new \Slim\Psr7\Response();
+        $response = $response->withStatus($code);
+        $response = $response->withHeader('Content-Type', 'application/json');
+        $response->getBody()->write(json_encode(array(
+            'success' => false,
+            'error' => array(
+                'code' => $code,
+                'message' => $message
+            )
+        )));
+        return $response;
+    }
+}
