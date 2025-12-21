@@ -1,7 +1,24 @@
 <?php
-/* Copyright (C) 2025 Alberto Luque Rivas <aluquerivasdev@gmail.com>
+/* Copyright (C) 2025 Alberto Luque Rivas <aluquerivasdev@gmail.com> | EasySoft Tech S.L <info@easysoft.es>
  *
- * EAPI Resource - Clase base para crear endpoints de forma simple
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * \file    easyapi/class/EasyApiResource.class.php
+ * \ingroup easyapi
+ * \brief   EAPI Resource - Clase base para crear endpoints de forma simple
  *
  * Esta clase facilita la creación de APIs REST de manera extremadamente
  * sencilla para desarrolladores de módulos de terceros.
@@ -13,11 +30,6 @@
  * 3. Extender esta clase e implementar registerRoutes()
  *
  * ¡Y LISTO! Los endpoints se registran automáticamente.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
  */
 
 namespace EasyApi;
