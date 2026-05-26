@@ -105,6 +105,7 @@ class DolibarrAuth implements MiddlewareInterface
 
         // Obtener API Key (header, Bearer o query param)
         $apiKey = $this->extractApiKey($request);
+        $isPublic = $this->isPublicRoute($path, $method);
 
         // Si hay API key, intentar autenticar
         if (!empty($apiKey)) {
@@ -113,6 +114,9 @@ class DolibarrAuth implements MiddlewareInterface
             if ($user) {
                 // Verificar que el usuario está activo
                 if ($user->statut != 1) {
+                    if ($isPublic) {
+                        return $handler->handle($request);
+                    }
                     return $this->unauthorizedResponse('User account is disabled');
                 }
 
@@ -129,12 +133,16 @@ class DolibarrAuth implements MiddlewareInterface
 
                 return $handler->handle($request);
             } else {
+                // API key inválida: si es ruta pública, continuar sin auth
+                if ($isPublic) {
+                    return $handler->handle($request);
+                }
                 return $this->unauthorizedResponse('Invalid API key');
             }
         }
 
         // No hay API key - verificar si es una ruta pública
-        if ($this->isPublicRoute($path, $method)) {
+        if ($isPublic) {
             // Ruta pública - continuar sin usuario
             return $handler->handle($request);
         }
@@ -186,6 +194,9 @@ class DolibarrAuth implements MiddlewareInterface
     /**
      * Autentica el API Key y devuelve el usuario
      *
+     * Soporta api_key almacenadas tanto en texto plano como encriptadas
+     * con dolEncrypt() (Dolibarr 16+).
+     *
      * @param string $apiKey
      * @return \User|null
      */
@@ -193,22 +204,62 @@ class DolibarrAuth implements MiddlewareInterface
     {
         global $conf;
 
-        // Buscar en llx_user el usuario con este api_key
+        require_once DOL_DOCUMENT_ROOT . '/user/class/user.class.php';
+
+        // Estrategia 1: comparación directa en SQL (api_key en texto plano)
         $sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "user";
         $sql .= " WHERE api_key = '" . $this->db->escape($apiKey) . "'";
-        $sql .= " AND statut = 1"; // Solo usuarios activos
+        $sql .= " AND statut = 1";
         $sql .= " AND entity IN (0, " . ((int) $conf->entity) . ")";
 
         $result = $this->db->query($sql);
 
         if ($result && $this->db->num_rows($result) > 0) {
             $obj = $this->db->fetch_object($result);
-
-            require_once DOL_DOCUMENT_ROOT . '/user/class/user.class.php';
             $user = new \User($this->db);
-
             if ($user->fetch($obj->rowid) > 0) {
                 return $user;
+            }
+        }
+
+        // Estrategia 2: comparación con dolEncrypt (api_key encriptada en BD)
+        if (function_exists('dolEncrypt')) {
+            $encryptedKey = dolEncrypt($apiKey);
+            $sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "user";
+            $sql .= " WHERE api_key = '" . $this->db->escape($encryptedKey) . "'";
+            $sql .= " AND statut = 1";
+            $sql .= " AND entity IN (0, " . ((int) $conf->entity) . ")";
+
+            $result = $this->db->query($sql);
+
+            if ($result && $this->db->num_rows($result) > 0) {
+                $obj = $this->db->fetch_object($result);
+                $user = new \User($this->db);
+                if ($user->fetch($obj->rowid) > 0) {
+                    return $user;
+                }
+            }
+        }
+
+        // Estrategia 3: recorrer usuarios activos y comparar con dolDecrypt
+        if (function_exists('dolDecrypt')) {
+            $sql = "SELECT rowid, api_key FROM " . MAIN_DB_PREFIX . "user";
+            $sql .= " WHERE api_key IS NOT NULL AND api_key != ''";
+            $sql .= " AND statut = 1";
+            $sql .= " AND entity IN (0, " . ((int) $conf->entity) . ")";
+
+            $result = $this->db->query($sql);
+
+            if ($result) {
+                while ($obj = $this->db->fetch_object($result)) {
+                    $decrypted = dolDecrypt($obj->api_key);
+                    if ($decrypted === $apiKey) {
+                        $user = new \User($this->db);
+                        if ($user->fetch($obj->rowid) > 0) {
+                            return $user;
+                        }
+                    }
+                }
             }
         }
 
