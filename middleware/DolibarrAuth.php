@@ -89,8 +89,15 @@ class DolibarrAuth implements MiddlewareInterface
      */
     public function process(Request $request, RequestHandler $handler): Response
     {
-        $fullPath = $request->getUri()->getPath();
         $method = $request->getMethod();
+
+        // Las peticiones preflight CORS (OPTIONS) no llevan credenciales: se dejan
+        // pasar para que CorsMiddleware responda con las cabeceras adecuadas.
+        if ($method === 'OPTIONS') {
+            return $handler->handle($request);
+        }
+
+        $fullPath = $request->getUri()->getPath();
 
         // Extraer solo la parte relativa de la ruta (sin el base path)
         $scriptName = isset($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
@@ -103,6 +110,9 @@ class DolibarrAuth implements MiddlewareInterface
             $path = '/';
         }
 
+        // Determinar una sola vez si la ruta es pública
+        $isPublic = $this->isPublicRoute($path, $method);
+
         // Obtener API Key (header, Bearer o query param)
         $apiKey = $this->extractApiKey($request);
 
@@ -113,6 +123,10 @@ class DolibarrAuth implements MiddlewareInterface
             if ($user) {
                 // Verificar que el usuario está activo
                 if ($user->statut != 1) {
+                    // En rutas públicas se sirve igualmente como anónimo
+                    if ($isPublic) {
+                        return $handler->handle($request);
+                    }
                     return $this->unauthorizedResponse('User account is disabled');
                 }
 
@@ -128,13 +142,17 @@ class DolibarrAuth implements MiddlewareInterface
                 $globalUser = $user;
 
                 return $handler->handle($request);
-            } else {
-                return $this->unauthorizedResponse('Invalid API key');
             }
+
+            // API key inválida: si la ruta es pública, continuar sin usuario
+            if ($isPublic) {
+                return $handler->handle($request);
+            }
+            return $this->unauthorizedResponse('Invalid API key');
         }
 
         // No hay API key - verificar si es una ruta pública
-        if ($this->isPublicRoute($path, $method)) {
+        if ($isPublic) {
             // Ruta pública - continuar sin usuario
             return $handler->handle($request);
         }
@@ -186,6 +204,11 @@ class DolibarrAuth implements MiddlewareInterface
     /**
      * Autentica el API Key y devuelve el usuario
      *
+     * Soporta api_key almacenada en texto plano y cifrada con dolEncrypt()
+     * (Dolibarr 17+). Replica la lógica del core (api/class/api_access.class.php):
+     * una única consulta indexada que compara contra el valor plano y contra el
+     * cifrado con semilla determinista, evitando recorrer toda la tabla de usuarios.
+     *
      * @param string $apiKey
      * @return \User|null
      */
@@ -193,9 +216,23 @@ class DolibarrAuth implements MiddlewareInterface
     {
         global $conf;
 
-        // Buscar en llx_user el usuario con este api_key
-        $sql = "SELECT rowid FROM " . MAIN_DB_PREFIX . "user";
-        $sql .= " WHERE api_key = '" . $this->db->escape($apiKey) . "'";
+        // Si la clave entrante ya viene cifrada (formato dolcrypt:...), descifrarla
+        if (preg_match('/^dolcrypt:/i', $apiKey) && function_exists('dolDecrypt')) {
+            $apiKey = dolDecrypt($apiKey);
+        }
+
+        if ($apiKey === '') {
+            return null;
+        }
+
+        // Comparar contra texto plano y, si está disponible, contra el cifrado
+        // determinista (misma semilla 'dolibarr' que usa el core de Dolibarr).
+        $sql = "SELECT rowid, api_key FROM " . MAIN_DB_PREFIX . "user";
+        $sql .= " WHERE (api_key = '" . $this->db->escape($apiKey) . "'";
+        if (function_exists('dolEncrypt')) {
+            $sql .= " OR api_key = '" . $this->db->escape(dolEncrypt($apiKey, '', '', 'dolibarr')) . "'";
+        }
+        $sql .= ")";
         $sql .= " AND statut = 1"; // Solo usuarios activos
         $sql .= " AND entity IN (0, " . ((int) $conf->entity) . ")";
 
@@ -203,6 +240,13 @@ class DolibarrAuth implements MiddlewareInterface
 
         if ($result && $this->db->num_rows($result) > 0) {
             $obj = $this->db->fetch_object($result);
+
+            // Verificación final: la clave almacenada (descifrada si procede) debe
+            // coincidir con la enviada.
+            $storedKey = function_exists('dolDecrypt') ? dolDecrypt($obj->api_key) : $obj->api_key;
+            if ($storedKey !== $apiKey && $obj->api_key !== $apiKey) {
+                return null;
+            }
 
             require_once DOL_DOCUMENT_ROOT . '/user/class/user.class.php';
             $user = new \User($this->db);

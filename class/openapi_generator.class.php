@@ -208,7 +208,7 @@ class OpenApiGenerator
                 'description' => $this->description . ($onlyPublic ? ' (Public endpoints only - authenticate to see all)' : ''),
                 'contact' => array(
                     'name' => 'EasyAPI Support',
-                    'email' => 'support@example.com'
+                    'email' => 'info@easysoft.es'
                 ),
                 'license' => array(
                     'name' => 'GPL-3.0',

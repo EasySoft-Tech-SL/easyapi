@@ -88,10 +88,15 @@ class RequestLogger implements MiddlewareInterface
         $userId = $user ? $user->id : 0;
         $userName = $user ? $user->login : 'anonymous';
 
+        // Redactar credenciales que puedan venir en el query string para no
+        // registrarlas en claro (DOLAPIKEY / api_key).
+        $uri = (string) $request->getUri();
+        $uri = preg_replace('/([?&](?:DOLAPIKEY|api_key)=)[^&]*/i', '$1***', $uri);
+
         $logEntry = array(
             'timestamp' => date('Y-m-d H:i:s'),
             'method' => $request->getMethod(),
-            'uri' => (string) $request->getUri(),
+            'uri' => $uri,
             'status' => $response->getStatusCode(),
             'duration_ms' => $duration,
             'user_id' => $userId,

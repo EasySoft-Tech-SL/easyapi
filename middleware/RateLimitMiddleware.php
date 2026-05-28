@@ -32,7 +32,9 @@ use Slim\Psr7\Response as SlimResponse;
 /**
  * Middleware de Rate Limiting
  *
- * Almacena los contadores en la tabla llx_easyapi_ratelimit
+ * Almacena los contadores en ficheros temporales del sistema
+ * (sys_get_temp_dir()), uno por identificador (usuario o IP), con bloqueo
+ * exclusivo para evitar condiciones de carrera bajo concurrencia.
  */
 class RateLimitMiddleware implements MiddlewareInterface
 {
@@ -117,29 +119,48 @@ class RateLimitMiddleware implements MiddlewareInterface
         $windowStart = $now - $this->windowSeconds;
         $key = md5($identifier);
 
-        // Contar peticiones en la ventana actual (usando tabla simple en memoria o caché)
-        // Implementación básica con archivo temporal
+        // Almacén por identificador en fichero temporal, con bloqueo exclusivo
+        // para que el ciclo leer-modificar-escribir sea atómico entre peticiones
+        // concurrentes.
         $cacheFile = sys_get_temp_dir() . '/easyapi_ratelimit_' . $key;
 
-        $requests = array();
-        if (file_exists($cacheFile)) {
-            $data = file_get_contents($cacheFile);
-            $requests = $data ? json_decode($data, true) : array();
+        $fp = @fopen($cacheFile, 'c+');
+        if ($fp === false) {
+            // Si no se puede acceder a la caché, no bloquear el servicio
+            return $this->maxRequests;
+        }
+
+        if (!flock($fp, LOCK_EX)) {
+            fclose($fp);
+            return $this->maxRequests;
+        }
+
+        $contents = stream_get_contents($fp);
+        $requests = $contents ? json_decode($contents, true) : array();
+        if (!is_array($requests)) {
+            $requests = array();
         }
 
         // Filtrar peticiones fuera de la ventana
-        $requests = array_filter($requests, function($timestamp) use ($windowStart) {
+        $requests = array_values(array_filter($requests, function ($timestamp) use ($windowStart) {
             return $timestamp > $windowStart;
-        });
+        }));
 
         // Verificar límite
         if (count($requests) >= $this->maxRequests) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
             return -1;
         }
 
         // Registrar nueva petición
         $requests[] = $now;
-        file_put_contents($cacheFile, json_encode($requests));
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($requests));
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
 
         return $this->maxRequests - count($requests);
     }
