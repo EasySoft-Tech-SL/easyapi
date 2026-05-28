@@ -187,6 +187,12 @@ abstract class EasyApiResource
             $self->registerRoutes();
         });
 
+        // Finalizar de forma explícita la última ruta pendiente, sin depender
+        // del __destruct (que podría ejecutarse después de app->run()).
+        if (!empty($this->currentRouteParams)) {
+            $this->finalize();
+        }
+
         // Registrar tag si hay descripción
         if (!empty($this->description)) {
             $this->api->getOpenApiGenerator()->addTag(
@@ -724,7 +730,7 @@ abstract class EasyApiResource
                 break;
 
             case 'integer':
-                if (!is_int($value) && !ctype_digit(strval($value))) {
+                if (!is_int($value) && !preg_match('/^-?\d+$/', (string) $value)) {
                     return "El campo '$field' debe ser un número entero";
                 }
                 break;

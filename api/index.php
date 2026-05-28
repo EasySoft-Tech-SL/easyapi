@@ -93,13 +93,20 @@ try {
 } catch (Throwable $e) {
     http_response_code(500);
     header('Content-Type: application/json');
+
+    // Solo exponer detalles del error (mensaje, fichero, línea) en modo debug
+    $debug = !empty($conf->global->EASYAPI_DEBUG);
+    $error = [
+        'code' => 500,
+        'message' => $debug ? $e->getMessage() : 'Internal server error'
+    ];
+    if ($debug) {
+        $error['file'] = $e->getFile();
+        $error['line'] = $e->getLine();
+    }
+
     echo json_encode([
         'success' => false,
-        'error' => [
-            'code' => 500,
-            'message' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine()
-        ]
+        'error' => $error
     ]);
 }

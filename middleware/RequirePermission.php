@@ -24,7 +24,7 @@
  * necesarios de Dolibarr para acceder al endpoint.
  */
 
-namespace EasyAPI\Middleware;
+namespace EasyApi\Middleware;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -78,6 +78,12 @@ class RequirePermission implements MiddlewareInterface
         // Si no hay usuario autenticado, denegar acceso
         if (empty($user)) {
             return $this->denyAccess('Authentication required. Please provide DOLAPIKEY.', 401);
+        }
+
+        // Los administradores tienen todos los permisos (coherente con
+        // ApiEasyApi::checkPermission() y OpenApiGenerator)
+        if (!empty($user->admin)) {
+            return $handler->handle($request);
         }
 
         // Verificar permisos

@@ -147,7 +147,7 @@ class modEasyapi extends DolibarrModules
 		$this->langfiles = array("easyapi@easyapi");
 
 		// Prerequisites
-		$this->phpmin = array(7, 0); // Minimum version of PHP required by module
+		$this->phpmin = array(7, 4); // Minimum version of PHP required by module (Slim 4 requires PHP 7.4+)
 		$this->need_dolibarr_version = array(11, -3); // Minimum version of Dolibarr required by module
 		$this->need_javascript_ajax = 0;
 

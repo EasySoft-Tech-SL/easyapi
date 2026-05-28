@@ -1,5 +1,21 @@
 # CHANGELOG EASYAPI FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## [Unreleased]
+
+### 🔒 Seguridad
+- **DolibarrAuth**: las peticiones preflight CORS (`OPTIONS`) ya no devuelven 401, permitiendo el acceso desde frontends en otro origen.
+- **DolibarrAuth**: soporte de `api_key` cifrada (Dolibarr 17+) mediante consulta indexada (texto plano + cifrado determinista, patrón del core), sin recorrer toda la tabla de usuarios.
+- **api/index.php**: los detalles de excepción (`file`/`line`/mensaje) solo se exponen con `EASYAPI_DEBUG` activo.
+- **RequestLogger**: se redactan `DOLAPIKEY`/`api_key` del query string antes de registrarlos.
+
+### 🐛 Correcciones
+- **CORS**: el interruptor `EASYAPI_CORS_ENABLED` ahora se respeta (antes CORS estaba siempre activo).
+- **RequirePermission**: los administradores tienen acceso completo, coherente con el resto del módulo.
+- **RateLimitMiddleware**: bloqueo exclusivo de fichero para evitar condiciones de carrera al contar peticiones.
+- **DolibarrAuth (rutas públicas)**: si la `api_key` es inválida o el usuario está deshabilitado, las rutas públicas (p. ej. `/docs`) se sirven igualmente.
+- **EasyApiResource**: validación de enteros que ahora acepta negativos; finalización explícita de la última ruta (sin depender del destructor).
+- **modEasyapi**: `phpmin` actualizado a 7.4 (requisito real de Slim 4).
+
 ## [1.0.0] - 2025-12-21
 
 ### ✨ Lanzamiento Inicial

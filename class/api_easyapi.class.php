@@ -93,7 +93,8 @@ class ApiEasyApi
 
         $this->config = array(
             'debug' => !empty($conf->global->EASYAPI_DEBUG),
-            'cors_enabled' => !empty($conf->global->EASYAPI_CORS_ENABLED) ? true : true, // Activado por defecto
+            // Activado por defecto: solo se desactiva si la constante existe y vale 0/''
+            'cors_enabled' => !isset($conf->global->EASYAPI_CORS_ENABLED) || !empty($conf->global->EASYAPI_CORS_ENABLED),
             'cors_origin' => isset($conf->global->EASYAPI_CORS_ORIGIN) ? $conf->global->EASYAPI_CORS_ORIGIN : '*',
             'rate_limit_enabled' => !empty($conf->global->EASYAPI_RATE_LIMIT_ENABLED),
             'rate_limit_max' => (int) (isset($conf->global->EASYAPI_RATE_LIMIT_MAX) ? $conf->global->EASYAPI_RATE_LIMIT_MAX : 100),
